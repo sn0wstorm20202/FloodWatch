@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Body, FastAPI, HTTPException, Query
@@ -19,6 +20,249 @@ from utils import haversine_m, risk_level
 
 logging.basicConfig(level=getattr(logging, config.LOG_LEVEL, logging.INFO))
 logger = logging.getLogger("floodwatch")
+
+try:
+    from colorama import Fore, Style
+    from colorama import init as _colorama_init
+
+    _colorama_init()
+except Exception:  # pragma: no cover
+    class _NoColor:
+        def __getattr__(self, _name: str) -> str:
+            return ""
+
+    Fore = _NoColor()  # type: ignore
+    Style = _NoColor()  # type: ignore
+
+
+def _clamp01(x: float) -> float:
+    try:
+        if x < 0.0:
+            return 0.0
+        if x > 1.0:
+            return 1.0
+        return float(x)
+    except Exception:
+        return 0.0
+
+
+def _fmt_num(x, digits: int = 3) -> str:
+    try:
+        if x is None:
+            return "—"
+        return f"{float(x):.{digits}f}"
+    except Exception:
+        return "—"
+
+
+def _fmt_int(x) -> str:
+    try:
+        if x is None:
+            return "—"
+        return str(int(x))
+    except Exception:
+        return "—"
+
+
+def _bar01(value: float, width: int = 24, fill: str = "█", empty: str = "░") -> str:
+    v = _clamp01(value)
+    n = int(round(v * width))
+    n = max(0, min(width, n))
+    left = fill * n
+    right = empty * (width - n)
+    return f"{Fore.CYAN}{left}{Style.RESET_ALL}{Fore.WHITE}{right}{Style.RESET_ALL}"
+
+
+def _bar_count(count: int, max_count: int, width: int = 18) -> str:
+    try:
+        if max_count <= 0:
+            return _bar01(0.0, width=width)
+        return _bar01(float(count) / float(max_count), width=width)
+    except Exception:
+        return _bar01(0.0, width=width)
+
+
+def _format_training_report(rep: dict) -> str:
+    def _env_flag(name: str, default: str = "0") -> bool:
+        try:
+            return os.getenv(name, default) == "1"
+        except Exception:
+            return False
+
+    def _tag(value: float | None, good: float, ok: float) -> str:
+        if value is None:
+            return f"{Fore.WHITE}—{Style.RESET_ALL}"
+        v = float(value)
+        if v >= good:
+            return f"{Fore.GREEN}{Style.BRIGHT}GOOD{Style.RESET_ALL}"
+        if v >= ok:
+            return f"{Fore.YELLOW}{Style.BRIGHT}OK{Style.RESET_ALL}"
+        return f"{Fore.RED}{Style.BRIGHT}LOW{Style.RESET_ALL}"
+
+    verbose = _env_flag("FLOODWATCH_ML_REPORT_VERBOSE", "0")
+
+    line = f"{Fore.MAGENTA}{'═' * 72}{Style.RESET_ALL}"
+    title = f"{Style.BRIGHT}{Fore.MAGENTA}FLOODWATCH • ML DASHBOARD{Style.RESET_ALL}"
+
+    trained_at = rep.get("trained_at_utc")
+    samples = rep.get("samples")
+    train_seconds = rep.get("train_seconds")
+    sil = rep.get("silhouette_score")
+    pseudo = rep.get("pseudo_label_rate")
+    high_cluster = rep.get("high_risk_cluster")
+    anomaly_stats = rep.get("anomaly_score_stats") if isinstance(rep.get("anomaly_score_stats"), dict) else {}
+    coefs = rep.get("classifier_coefficients") if isinstance(rep.get("classifier_coefficients"), dict) else {}
+
+    holdout = rep.get("holdout_metrics") if isinstance(rep.get("holdout_metrics"), dict) else {}
+    cluster_counts = rep.get("cluster_counts") if isinstance(rep.get("cluster_counts"), dict) else {}
+    cluster_risk_map = rep.get("cluster_risk_map") if isinstance(rep.get("cluster_risk_map"), dict) else {}
+
+    max_count = 0
+    try:
+        max_count = max(int(v) for v in cluster_counts.values()) if cluster_counts else 0
+    except Exception:
+        max_count = 0
+
+    try:
+        sil_v = float(sil) if sil is not None else None
+    except Exception:
+        sil_v = None
+
+    try:
+        pseudo_v = _clamp01(float(pseudo))
+    except Exception:
+        pseudo_v = 0.0
+
+    try:
+        acc_v = float(holdout.get("accuracy")) if holdout.get("accuracy") is not None else None
+    except Exception:
+        acc_v = None
+    try:
+        f1_v = float(holdout.get("f1")) if holdout.get("f1") is not None else None
+    except Exception:
+        f1_v = None
+    try:
+        prec_v = float(holdout.get("precision")) if holdout.get("precision") is not None else None
+    except Exception:
+        prec_v = None
+    try:
+        rec_v = float(holdout.get("recall")) if holdout.get("recall") is not None else None
+    except Exception:
+        rec_v = None
+    try:
+        roc_v = float(holdout.get("roc_auc")) if holdout.get("roc_auc") is not None else None
+    except Exception:
+        roc_v = None
+    try:
+        ap_v = float(holdout.get("avg_precision")) if holdout.get("avg_precision") is not None else None
+    except Exception:
+        ap_v = None
+
+    if acc_v is not None and roc_v is not None and sil_v is not None:
+        ok_score = 0
+        ok_score += 1 if acc_v >= 0.90 else 0
+        ok_score += 1 if roc_v >= 0.90 else 0
+        ok_score += 1 if sil_v >= 0.30 else 0
+        if ok_score == 3:
+            status = f"{Fore.GREEN}{Style.BRIGHT}HEALTHY{Style.RESET_ALL}"
+        elif ok_score == 2:
+            status = f"{Fore.YELLOW}{Style.BRIGHT}OK{Style.RESET_ALL}"
+        else:
+            status = f"{Fore.RED}{Style.BRIGHT}CHECK{Style.RESET_ALL}"
+    else:
+        status = f"{Fore.YELLOW}{Style.BRIGHT}PARTIAL{Style.RESET_ALL}"
+
+    out: list[str] = []
+    out.append(line)
+    out.append(title + f"  {Fore.WHITE}[{status}{Fore.WHITE}]{Style.RESET_ALL}")
+    out.append(line)
+    out.append(
+        f"{Fore.CYAN}{Style.BRIGHT}DATA{Style.RESET_ALL} "
+        f"trained={trained_at or '—'} | samples={_fmt_int(samples)} | time={_fmt_num(train_seconds, 2)}s"
+    )
+    out.append(
+        f"{Fore.CYAN}{Style.BRIGHT}QUALITY{Style.RESET_ALL} "
+        f"sil={_fmt_num(sil_v, 3)}({_tag(sil_v, 0.50, 0.30)}) | pseudo_risky={_fmt_num(pseudo_v, 3)} {_bar01(pseudo_v, width=16)}"
+    )
+    if anomaly_stats:
+        out.append(
+            f"{Fore.CYAN}{Style.BRIGHT}ANOMALY{Style.RESET_ALL} "
+            f"avg={_fmt_num(anomaly_stats.get('mean'), 3)} | min={_fmt_num(anomaly_stats.get('min'), 2)} | max={_fmt_num(anomaly_stats.get('max'), 2)}"
+        )
+
+    if isinstance(holdout, dict) and holdout:
+        cm = holdout.get("confusion_matrix")
+        cm_str = ""
+        if isinstance(cm, list) and len(cm) == 2 and all(isinstance(r, list) and len(r) == 2 for r in cm):
+            try:
+                tn, fp = int(cm[0][0]), int(cm[0][1])
+                fn, tp = int(cm[1][0]), int(cm[1][1])
+                cm_str = f" | TP={tp} FP={fp} TN={tn} FN={fn}"
+            except Exception:
+                cm_str = ""
+        out.append(
+            f"{Fore.CYAN}{Style.BRIGHT}TEST{Style.RESET_ALL} "
+            f"acc={_fmt_num(acc_v, 4)} | prec={_fmt_num(prec_v, 4)} | rec={_fmt_num(rec_v, 4)} | f1={_fmt_num(f1_v, 4)} | auc={_fmt_num(roc_v, 4)} | ap={_fmt_num(ap_v, 4)}{cm_str}"
+        )
+
+    out.append(f"{Fore.CYAN}{Style.BRIGHT}CLUSTERS{Style.RESET_ALL} high_risk_id={_fmt_int(high_cluster)}")
+    if cluster_counts:
+        for k in sorted(cluster_counts.keys(), key=lambda x: int(x) if str(x).lstrip('-').isdigit() else str(x)):
+            try:
+                cid = int(k)
+            except Exception:
+                cid = k
+            try:
+                cnt = int(cluster_counts.get(k, 0))
+            except Exception:
+                cnt = 0
+            risk = cluster_risk_map.get(str(cid), cluster_risk_map.get(cid, None))
+            try:
+                risk_v = _clamp01(float(risk)) if risk is not None else 0.0
+            except Exception:
+                risk_v = 0.0
+
+            if risk_v >= 0.80:
+                risk_tag = f"{Fore.RED}{Style.BRIGHT}HIGH{Style.RESET_ALL}"
+            elif risk_v >= 0.40:
+                risk_tag = f"{Fore.YELLOW}{Style.BRIGHT}MED{Style.RESET_ALL}"
+            else:
+                risk_tag = f"{Fore.GREEN}{Style.BRIGHT}LOW{Style.RESET_ALL}"
+
+            out.append(
+                f"  {Fore.WHITE}#{cid}:{Style.RESET_ALL} {cnt:>5} {_bar_count(cnt, max_count)}"
+                f"  risk={_fmt_num(risk_v, 2)} {_bar01(risk_v, width=12)} {risk_tag}"
+            )
+    else:
+        out.append(f"  {Fore.WHITE}—{Style.RESET_ALL}")
+
+    if coefs:
+        out.append(f"{Fore.CYAN}{Style.BRIGHT}DRIVERS{Style.RESET_ALL}")
+        try:
+            items = [(str(k), float(v)) for k, v in coefs.items()]
+            items.sort(key=lambda kv: abs(kv[1]), reverse=True)
+            top = items[:4]
+            denom = abs(top[0][1]) if top and top[0][1] != 0 else 1.0
+            for k, v in top:
+                arrow = f"{Fore.RED}↑{Style.RESET_ALL}" if v >= 0 else f"{Fore.GREEN}↓{Style.RESET_ALL}"
+                strength = _clamp01(min(1.0, abs(v) / denom))
+                out.append(
+                    f"  {arrow} {Fore.WHITE}{k}{Style.RESET_ALL} coef={_fmt_num(v, 3)} {_bar01(strength, width=16)}"
+                )
+        except Exception:
+            pass
+
+    if verbose:
+        out.append("")
+        out.append(f"{Fore.WHITE}Verbose mode is ON (FLOODWATCH_ML_REPORT_VERBOSE=1).{Style.RESET_ALL}")
+        out.append(f"{Fore.WHITE}Risk score range: 0.0 safer → 1.0 riskier.{Style.RESET_ALL}")
+
+    report_path = str(config.ML_REPORT_PATH)
+    out.append(line)
+    out.append(f"{Fore.WHITE}Report file: {Fore.CYAN}{report_path}{Style.RESET_ALL}")
+    out.append(line)
+    return "\n".join(out)
+
 
 loader: DataLoader | None = None
 store: ReportStore | None = None
@@ -106,12 +350,25 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("ML training failed; continuing in demo-safe fallback mode")
 
-    try:
-        if ml_engine is not None and ml_engine.training_report is None and config.ML_REPORT_PATH.exists():
-            with config.ML_REPORT_PATH.open("r", encoding="utf-8") as f:
-                ml_engine.training_report = json.load(f)
+     try:
+        rep = getattr(ml_engine, "training_report", None)
+
+        # Load training report from disk if not already loaded
+        if not (isinstance(rep, dict) and rep):
+            try:
+                if config.ML_REPORT_PATH.exists():
+                    with config.ML_REPORT_PATH.open("r", encoding="utf-8") as f:
+                        rep = json.load(f)
+                        ml_engine.training_report = rep
+            except Exception:
+                rep = None
+
+        # Pretty-print ML dashboard if report is available
+        if isinstance(rep, dict) and rep:
+            logger.info("\n%s", _format_training_report(rep))
+
     except Exception:
-        logger.exception("Failed to load ML training report from disk")
+        logger.info("ML training report available but could not be serialized")
 
     routing_engine = RoutingEngine(loader, ml_engine)
     alerts_engine = AlertsEngine(store, ml_engine)
@@ -346,4 +603,12 @@ def retrain_ml():
     except Exception:
         logger.exception("/ml/retrain failed")
         raise HTTPException(status_code=500, detail="Retrain failed")
+
+    try:
+        rep = getattr(me, "training_report", None)
+        if isinstance(rep, dict) and rep:
+            logger.info("\n%s", _format_training_report(rep))
+    except Exception:
+        logger.info("ML training report available after retrain but could not be serialized")
+
     return {"status": "retrained", "trained": me.models is not None, "training_report": me.training_report}
