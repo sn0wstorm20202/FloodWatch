@@ -11,6 +11,13 @@ PROJECT_DIR = BACKEND_DIR.parent
 _DEFAULT_DATA_DIR = PROJECT_DIR / "data"
 DATA_DIR = _DEFAULT_DATA_DIR if _DEFAULT_DATA_DIR.exists() else PROJECT_DIR
 
+ML_ARTIFACT_DIR = BACKEND_DIR / "ml_artifacts"
+ML_MODEL_PATH = ML_ARTIFACT_DIR / "ml_model.joblib"
+ML_REPORT_PATH = ML_ARTIFACT_DIR / "ml_training_report.json"
+ML_PLOTS_DIR = ML_ARTIFACT_DIR / "plots"
+
+ML_PERSIST_MODELS = True
+
 RAINFALL_CSV_PATH = DATA_DIR / "Kolkata_Rainfall.csv"
 SURFACE_WATER_CSV_PATH = DATA_DIR / "Kolkata_Surface_Water_CSV.csv"
 ELEVATION_TIF_PATH = DATA_DIR / "Kolkata_Elevation.tif"

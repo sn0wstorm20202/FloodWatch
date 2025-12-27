@@ -1,0 +1,98 @@
+{
+  "trained_at_utc": "2025-12-27T05:59:48.300482+00:00",
+  "samples": 8100,
+  "high_risk_cluster": 0,
+  "pseudo_label_rate": 0.43777777777777777,
+  "cluster_counts": {
+    "1": 3747,
+    "0": 3503,
+    "2": 850
+  },
+  "cluster_risk_map": {
+    "0": 1.0,
+    "1": 0.5,
+    "2": 0.0
+  },
+  "anomaly_score_stats": {
+    "min": 0.0,
+    "max": 1.0,
+    "mean": 0.28133626133274725
+  },
+  "silhouette_score": 0.7113271023538636,
+  "holdout_metrics": {
+    "accuracy": 0.9876543209876543,
+    "precision": 0.979933110367893,
+    "recall": 0.9920993227990971,
+    "f1": 0.9859786876051598,
+    "roc_auc": 0.9997611861024185,
+    "avg_precision": 0.9996958453381996,
+    "confusion_matrix": [
+      [
+        1121,
+        18
+      ],
+      [
+        7,
+        879
+      ]
+    ]
+  },
+  "classifier_coefficients": {
+    "elevation": -0.4058071690054415,
+    "rainfall": -0.0008833006859874648,
+    "water_occurrence": 7.974858130457759,
+    "urban_density": 11.815142561014154
+  },
+  "fingerprint": {
+    "rainfall_csv": {
+      "path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\Kolkata_Rainfall.csv",
+      "size": 2902860,
+      "mtime": 1766764370.8846862
+    },
+    "surface_water_csv": {
+      "path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\Kolkata_Surface_Water_CSV.csv",
+      "size": 1089852,
+      "mtime": 1766764398.1274984
+    },
+    "elevation_tif": {
+      "path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\Kolkata_Elevation.tif",
+      "size": 120651,
+      "mtime": 1766764345.3087566
+    },
+    "landcover_tif": {
+      "path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\Kolkata_Landcover.tif",
+      "size": 252933,
+      "mtime": 1766764356.6410344
+    },
+    "roads_graphml": {
+      "path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\kolkata_roads.graphml",
+      "size": 38552221,
+      "mtime": 1766764394.5590806
+    }
+  },
+  "artifacts": {
+    "model_path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\backend\\ml_artifacts\\ml_model.joblib",
+    "report_path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\backend\\ml_artifacts\\ml_training_report.json",
+    "plots_dir": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\backend\\ml_artifacts\\plots"
+  },
+  "plots": {
+    "cluster_counts": "cluster_counts.png",
+    "anomaly_hist": "anomaly_hist.png",
+    "risk_hist": "risk_hist.png",
+    "feature_hists": "feature_hists.png",
+    "pca_clusters": "pca_clusters.png",
+    "risk_heatmap": "risk_heatmap.png"
+  },
+  "plot_meta": {
+    "risk_heatmap": {
+      "bounds": {
+        "west": 88.30827491320474,
+        "east": 88.47776904101242,
+        "south": 22.478332926893593,
+        "north": 22.65688806153375
+      },
+      "bins": 80
+    }
+  },
+  "train_seconds": 20.034645080566406
+}

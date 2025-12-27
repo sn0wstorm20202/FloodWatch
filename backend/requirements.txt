@@ -9,3 +9,5 @@ geopandas>=0.14
 shapely>=2.0
 pyproj>=3.6
 scikit-learn>=1.4
+matplotlib>=3.8
+joblib>=1.3

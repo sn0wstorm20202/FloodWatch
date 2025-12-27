@@ -25,15 +25,20 @@ class AlertsEngine:
         self.store = store
         self.ml_engine = ml_engine
 
-    def get_alerts(self) -> List[str]:
-        alerts: List[str] = []
+    def get_alerts(self) -> List[dict]:
+        alerts: List[dict] = []
 
-        hotspots = self.store.hotspots(grid_decimals=2)
+        hotspots = self.store.hotspots_detailed(grid_decimals=2)
         if not hotspots:
-            # Demo-safe: if no crowd reports but demo mode is on, still return empty list (contract).
             return []
 
-        for lat, lon, count in hotspots:
+        for h in hotspots:
+            lat = float(h.get("lat", 0.0))
+            lon = float(h.get("lon", 0.0))
+            count = int(h.get("count", 0))
+            sev_max = int(h.get("severity_max", 0))
+            sev_avg = float(h.get("severity_avg", 0.0))
+
             try:
                 score = float(self.ml_engine.predict_risk(float(lat), float(lon))["ml_risk"])
             except Exception:
@@ -41,11 +46,23 @@ class AlertsEngine:
                 continue
 
             if float(score) > 0.70 and int(count) >= 3:
+                msg = f"High flood risk near {float(lat):.2f}, {float(lon):.2f} – dispatch recommended"
                 alerts.append(
-                    f"High flood risk near {float(lat):.2f}, {float(lon):.2f} – dispatch recommended"
+                    {
+                        "lat": float(lat),
+                        "lon": float(lon),
+                        "risk_score": float(score),
+                        "count": int(count),
+                        "severity_max": int(sev_max),
+                        "severity_avg": float(sev_avg),
+                        "message": msg,
+                    }
                 )
 
         if alerts:
             for a in alerts:
-                logger.warning("ALERT (mock): %s", a)
+                try:
+                    logger.warning("ALERT (mock): %s", a.get("message"))
+                except Exception:
+                    pass
         return alerts

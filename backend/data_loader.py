@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -50,6 +51,7 @@ class DataLoader:
         self.water_lat_col: Optional[str] = None
         self.water_lon_col: Optional[str] = None
         self._water_points_lonlat: Optional[np.ndarray] = None
+        self._water_occurrence: Optional[np.ndarray] = None
 
         self.elevation_ds: Optional[rasterio.io.DatasetReader] = None
         self.elevation_stats: Optional[RasterStats] = None
@@ -171,12 +173,47 @@ class DataLoader:
 
         lat_col, lon_col = self._pick_lat_lon_columns(df)
         if not lat_col or not lon_col:
+            geo_col = ".geo" if ".geo" in df.columns else None
+            if geo_col is not None:
+                lats: list[float] = []
+                lons: list[float] = []
+
+                for v in df[geo_col].tolist():
+                    try:
+                        if not isinstance(v, str) or not v:
+                            lats.append(np.nan)
+                            lons.append(np.nan)
+                            continue
+                        gj = json.loads(v)
+                        coords = gj.get("coordinates")
+                        if not coords or len(coords) < 2:
+                            lats.append(np.nan)
+                            lons.append(np.nan)
+                            continue
+                        lon, lat = float(coords[0]), float(coords[1])
+                        lats.append(lat)
+                        lons.append(lon)
+                    except Exception:
+                        lats.append(np.nan)
+                        lons.append(np.nan)
+
+                df = df.copy()
+                df["lat"] = lats
+                df["lon"] = lons
+                lat_col, lon_col = "lat", "lon"
+
+        if not lat_col or not lon_col:
             logger.warning("Surface water CSV loaded but lat/lon columns not detected.")
             self.surface_water_df = df
             return
 
+        occ_col = "occurrence" if "occurrence" in df.columns else None
+        if occ_col is None:
+            occ_col = self._pick_numeric_column(df, preferred_substrings=["occur", "occ"])
+
         lat = pd.to_numeric(df[lat_col], errors="coerce")
         lon = pd.to_numeric(df[lon_col], errors="coerce")
+
         mask = lat.notna() & lon.notna()
         df = df.loc[mask].copy()
 
@@ -196,6 +233,14 @@ class DataLoader:
         self._water_points_lonlat = np.column_stack(
             [df[lon_col].astype(float).to_numpy(), df[lat_col].astype(float).to_numpy()]
         )
+
+        try:
+            occ_clean = pd.to_numeric(df[occ_col], errors="coerce") if occ_col else pd.Series(np.full(len(df), np.nan))
+            occ_clean = occ_clean.fillna(0.0).astype(float)
+            self._water_occurrence = np.clip(occ_clean.to_numpy(dtype=float) / 100.0, 0.0, 1.0)
+        except Exception:
+            logger.exception("Failed to normalize surface water occurrence; defaulting to zeros")
+            self._water_occurrence = np.zeros(len(df), dtype=float)
 
         logger.info("Loaded surface water CSV: path=%s rows=%d lat_col=%s lon_col=%s", path, len(df), lat_col, lon_col)
 
@@ -375,6 +420,9 @@ class DataLoader:
 
     def water_points_lonlat(self) -> Optional[np.ndarray]:
         return self._water_points_lonlat
+
+    def water_occurrence_values(self) -> Optional[np.ndarray]:
+        return self._water_occurrence
 
     def nearest_graph_node(self, lat: float, lon: float) -> Optional[str]:
         if self._graph_nodes_lonlat is None or not self._graph_node_ids:

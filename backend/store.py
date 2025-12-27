@@ -66,3 +66,34 @@ class ReportStore:
         out = [(lat, lon, cnt) for (lat, lon), cnt in buckets.items()]
         out.sort(key=lambda x: x[2], reverse=True)
         return out
+
+    def hotspots_detailed(self, grid_decimals: int = 2) -> List[dict]:
+        self.prune()
+        buckets: dict[tuple[float, float], dict[str, float]] = {}
+        for r in self._reports:
+            key = (round(float(r.lat), grid_decimals), round(float(r.lon), grid_decimals))
+            b = buckets.get(key)
+            if b is None:
+                buckets[key] = {"count": 0.0, "sev_sum": 0.0, "sev_max": float(r.severity)}
+                b = buckets[key]
+            b["count"] = float(b.get("count", 0.0)) + 1.0
+            b["sev_sum"] = float(b.get("sev_sum", 0.0)) + float(r.severity)
+            b["sev_max"] = float(max(float(b.get("sev_max", 0.0)), float(r.severity)))
+
+        out: List[dict] = []
+        for (lat, lon), b in buckets.items():
+            cnt = int(b.get("count", 0.0))
+            if cnt <= 0:
+                continue
+            sev_avg = float(b.get("sev_sum", 0.0)) / float(cnt)
+            out.append(
+                {
+                    "lat": float(lat),
+                    "lon": float(lon),
+                    "count": int(cnt),
+                    "severity_max": int(b.get("sev_max", 0.0)),
+                    "severity_avg": float(sev_avg),
+                }
+            )
+        out.sort(key=lambda x: int(x.get("count", 0)), reverse=True)
+        return out

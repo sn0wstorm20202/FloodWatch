@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 import config
@@ -53,7 +54,7 @@ async def lifespan(app: FastAPI):
     store = ReportStore()
     ml_engine = MLEngine(loader)
     try:
-        ml_engine.train()
+        ml_engine.load_or_train(force_retrain=False)
     except Exception:
         logger.exception("ML training failed; continuing in demo-safe fallback mode")
 
@@ -167,9 +168,74 @@ def get_alerts():
     ae = _require(alerts_engine, "alerts_engine")
     try:
         alerts = ae.get_alerts()
-        return {"alerts": alerts}
+        legacy = []
+        try:
+            legacy = [a.get("message") for a in alerts if isinstance(a, dict) and isinstance(a.get("message"), str)]
+        except Exception:
+            legacy = []
+        return {"alerts": alerts, "messages": legacy}
     except HTTPException:
         raise
     except Exception:
         logger.exception("/alerts failed")
-        return {"alerts": []}
+        return {"alerts": [], "messages": []}
+
+
+@app.get("/ml/stats")
+def get_ml_stats():
+    me = _require(ml_engine, "ml_engine")
+    return {"trained": me.models is not None, "training_report": me.training_report}
+
+
+@app.get("/ml/plots")
+def get_ml_plots():
+    me = _require(ml_engine, "ml_engine")
+    plots = {}
+    if isinstance(me.training_report, dict):
+        plots = me.training_report.get("plots") or {}
+    return {"plots": plots}
+
+
+@app.get("/ml/plot/{plot_name}")
+def get_ml_plot(plot_name: str):
+    me = _require(ml_engine, "ml_engine")
+    if not isinstance(me.training_report, dict):
+        raise HTTPException(status_code=404, detail="No training report available")
+    plots = me.training_report.get("plots") or {}
+    filename = plots.get(plot_name)
+    if not isinstance(filename, str) or not filename:
+        raise HTTPException(status_code=404, detail="Plot not found")
+    p = config.ML_PLOTS_DIR / filename
+    try:
+        if not p.exists():
+            raise HTTPException(status_code=404, detail="Plot file missing")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=404, detail="Plot file missing")
+    return FileResponse(path=str(p), media_type="image/png", filename=filename)
+
+
+@app.get("/ml/plot_meta/{plot_name}")
+def get_ml_plot_meta(plot_name: str):
+    me = _require(ml_engine, "ml_engine")
+    if not isinstance(me.training_report, dict):
+        raise HTTPException(status_code=404, detail="No training report available")
+    meta = me.training_report.get("plot_meta") or {}
+    if not isinstance(meta, dict):
+        meta = {}
+    out = meta.get(plot_name)
+    if out is None:
+        raise HTTPException(status_code=404, detail="Plot metadata not found")
+    return {"plot": plot_name, "meta": out}
+
+
+@app.post("/ml/retrain")
+def retrain_ml():
+    me = _require(ml_engine, "ml_engine")
+    try:
+        me.load_or_train(force_retrain=True)
+    except Exception:
+        logger.exception("/ml/retrain failed")
+        raise HTTPException(status_code=500, detail="Retrain failed")
+    return {"status": "retrained", "trained": me.models is not None, "training_report": me.training_report}
