@@ -350,7 +350,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("ML training failed; continuing in demo-safe fallback mode")
 
-     try:
+    try:
         rep = getattr(ml_engine, "training_report", None)
 
         # Load training report from disk if not already loaded
