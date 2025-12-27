@@ -4,6 +4,10 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -272,6 +276,7 @@ alerts_engine: AlertsEngine | None = None
 
 DEFAULT_PLOTS = {
     "risk_heatmap": "risk_heatmap.png",
+    "waterlogging_hotspots_28y": "waterlogging_hotspots_28y.png",
 }
 
 DEFAULT_PLOT_META = {
@@ -283,8 +288,164 @@ DEFAULT_PLOT_META = {
             "north": 22.65688806153375,
         },
         "bins": 80,
-    }
+    },
+    "waterlogging_hotspots_28y": {
+        "bounds": {
+            "west": 88.30827491320474,
+            "east": 88.47776904101242,
+            "south": 22.478332926893593,
+            "north": 22.65688806153375,
+        },
+        "bins": 256,
+    },
 }
+
+
+_waterlogging_hotspots_meta: dict | None = None
+
+
+def _compute_waterlogging_hotspots_meta(bins: int = 256) -> dict | None:
+    global loader, _waterlogging_hotspots_meta
+    if isinstance(_waterlogging_hotspots_meta, dict):
+        return _waterlogging_hotspots_meta
+
+    ld = loader
+    if ld is None or ld.surface_water_df is None or ld._water_points_lonlat is None:
+        return None
+
+    pts = ld._water_points_lonlat
+    try:
+        lon = pts[:, 0].astype(float)
+        lat = pts[:, 1].astype(float)
+    except Exception:
+        return None
+
+    if lon.size == 0 or lat.size == 0:
+        return None
+
+    try:
+        west = float(np.nanpercentile(lon, 0.5))
+        east = float(np.nanpercentile(lon, 99.5))
+        south = float(np.nanpercentile(lat, 0.5))
+        north = float(np.nanpercentile(lat, 99.5))
+    except Exception:
+        try:
+            west = float(lon.min())
+            east = float(lon.max())
+            south = float(lat.min())
+            north = float(lat.max())
+        except Exception:
+            return None
+
+    try:
+        pad_lon = max(0.001, (east - west) * 0.02)
+        pad_lat = max(0.001, (north - south) * 0.02)
+        west -= pad_lon
+        east += pad_lon
+        south -= pad_lat
+        north += pad_lat
+    except Exception:
+        pass
+
+    out = {
+        "bounds": {
+            "west": west,
+            "east": east,
+            "south": south,
+            "north": north,
+        },
+        "bins": int(bins),
+        "metric": "water_occurrence",
+        "metric_units": "percent_of_time",
+    }
+    _waterlogging_hotspots_meta = out
+    return out
+
+
+def _ensure_waterlogging_hotspots_plot() -> Path:
+    meta = _compute_waterlogging_hotspots_meta(bins=256)
+    if not isinstance(meta, dict):
+        raise HTTPException(status_code=503, detail="Surface water dataset not available")
+
+    ld = _require(loader, "loader")
+    if ld._water_points_lonlat is None:
+        raise HTTPException(status_code=503, detail="Surface water dataset not available")
+
+    out_path = config.ML_PLOTS_DIR / "waterlogging_hotspots_28y.png"
+    try:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    try:
+        if out_path.exists() and out_path.stat().st_size > 0:
+            return out_path
+    except Exception:
+        pass
+
+    try:
+        import matplotlib.cm as cm
+    except Exception:
+        raise HTTPException(status_code=500, detail="Plot dependencies missing")
+
+    pts = ld._water_points_lonlat
+    lon = pts[:, 0].astype(float)
+    lat = pts[:, 1].astype(float)
+
+    weights = None
+    try:
+        w = getattr(ld, "_water_occurrence", None)
+        if w is not None:
+            w = np.asarray(w, dtype=float)
+            if w.shape[0] == lat.shape[0]:
+                weights = np.clip(w, 0.0, 1.0)
+    except Exception:
+        weights = None
+
+    b = meta.get("bounds") if isinstance(meta.get("bounds"), dict) else {}
+    west = float(b.get("west"))
+    east = float(b.get("east"))
+    south = float(b.get("south"))
+    north = float(b.get("north"))
+
+    bins = int(meta.get("bins") or 256)
+
+    try:
+        hist, _xedges, _yedges = np.histogram2d(
+            lat,
+            lon,
+            bins=(bins, bins),
+            range=[[south, north], [west, east]],
+            weights=weights,
+        )
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to generate heatmap")
+
+    hist = np.asarray(hist, dtype=float)
+    hist = np.flipud(hist)
+    hist = np.nan_to_num(hist, nan=0.0)
+    hist = np.log1p(hist)
+
+    mx = float(hist.max()) if hist.size else 0.0
+    if mx <= 0.0:
+        raise HTTPException(status_code=500, detail="Heatmap has no data")
+
+    norm = np.clip(hist / mx, 0.0, 1.0)
+
+    cmap = cm.get_cmap("inferno")
+    rgba = cmap(norm)
+
+    alpha = np.clip(norm ** 0.65, 0.0, 1.0) * 0.85
+    alpha = np.where(norm < 0.02, 0.0, alpha)
+    rgba[..., 3] = alpha
+
+    img = (rgba * 255.0).astype("uint8")
+    try:
+        Image.fromarray(img, mode="RGBA").save(str(out_path), format="PNG")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to save heatmap")
+
+    return out_path
 
 
 def _ensure_training_report_loaded() -> dict | None:
@@ -437,10 +598,31 @@ def get_risk(
         raise
     except Exception:
         logger.exception("/risk failed")
-        # Demo-safe: return a meaningful fallback instead of failing.
+        try:
+            me = ml_engine
+            fb = None
+            if me is not None:
+                fb_fn = getattr(me, "_predict_risk_fallback", None)
+                if callable(fb_fn):
+                    fb = fb_fn(float(lat), float(lon))
+
+            if isinstance(fb, dict):
+                score = float(fb.get("ml_risk", 0.40))
+                return {
+                    "risk_score": score,
+                    "risk_level": risk_level(score),
+                    "ml_details": {
+                        "cluster": int(fb.get("cluster_id", 0)),
+                        "anomaly": float(fb.get("anomaly_score", 0.5)),
+                    },
+                }
+        except Exception:
+            pass
+
+        score = 0.75 if config.DEMO_MODE else 0.40
         return {
-            "risk_score": 0.75 if config.DEMO_MODE else 0.40,
-            "risk_level": "Flooded" if config.DEMO_MODE else "Risky",
+            "risk_score": score,
+            "risk_level": risk_level(score),
             "ml_details": {"cluster": 0, "anomaly": 0.5},
         }
 
@@ -544,6 +726,10 @@ def get_ml_plot(plot_name: str):
     me = _require(ml_engine, "ml_engine")
     report = _ensure_training_report_loaded()
 
+    if plot_name == "waterlogging_hotspots_28y":
+        p = _ensure_waterlogging_hotspots_plot()
+        return FileResponse(path=str(p), media_type="image/png", filename=p.name)
+
     filename = None
     if isinstance(report, dict):
         plots = report.get("plots") or {}
@@ -578,6 +764,12 @@ def get_ml_plot(plot_name: str):
 def get_ml_plot_meta(plot_name: str):
     me = _require(ml_engine, "ml_engine")
     report = _ensure_training_report_loaded()
+
+    if plot_name == "waterlogging_hotspots_28y":
+        meta = _compute_waterlogging_hotspots_meta(bins=256)
+        if meta is not None:
+            return {"plot": plot_name, "meta": meta}
+        raise HTTPException(status_code=503, detail="Surface water dataset not available")
 
     meta = {}
     if isinstance(report, dict):

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 # Demo-safe mode: intentionally biases the system toward higher visible risk.
-DEMO_MODE = True
+DEMO_MODE = os.getenv("FLOODWATCH_DEMO_MODE", "0") == "1"
 
 # Paths
 BACKEND_DIR = Path(__file__).resolve().parent
