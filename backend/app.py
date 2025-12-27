@@ -54,7 +54,15 @@ async def lifespan(app: FastAPI):
     store = ReportStore()
     ml_engine = MLEngine(loader)
     try:
-        ml_engine.load_or_train(force_retrain=False)
+        loaded = False
+        try:
+            if config.ML_PERSIST_MODELS:
+                loaded = bool(ml_engine._try_load_persisted_model())
+        except Exception:
+            loaded = False
+
+        if not loaded and config.ML_AUTO_TRAIN_ON_STARTUP:
+            ml_engine.load_or_train(force_retrain=True)
     except Exception:
         logger.exception("ML training failed; continuing in demo-safe fallback mode")
 
@@ -82,6 +90,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
+@app.get("/ready")
+def readiness_check():
+    return {
+        "ready": all(x is not None for x in [loader, store, ml_engine, routing_engine, alerts_engine]),
+        "components": {
+            "loader": loader is not None,
+            "store": store is not None,
+            "ml_engine": ml_engine is not None,
+            "routing_engine": routing_engine is not None,
+            "alerts_engine": alerts_engine is not None,
+        },
+        "ml_trained": bool(getattr(ml_engine, "models", None) is not None) if ml_engine is not None else False,
+    }
 
 
 @app.get("/risk")
@@ -233,6 +261,8 @@ def get_ml_plot_meta(plot_name: str):
 @app.post("/ml/retrain")
 def retrain_ml():
     me = _require(ml_engine, "ml_engine")
+    if not config.ML_ALLOW_API_RETRAIN:
+        raise HTTPException(status_code=403, detail="API retrain disabled")
     try:
         me.load_or_train(force_retrain=True)
     except Exception:

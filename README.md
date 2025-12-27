@@ -29,6 +29,20 @@ Open:
 
 Base URL (local): `http://127.0.0.1:8000`
 
+### Health endpoints (for deployment/monitoring)
+
+#### GET `/health`
+
+Basic liveness check. Returns:
+- `{ "status": "ok" }`
+
+#### GET `/ready`
+
+Readiness check (whether startup initialized core services). Returns:
+- `ready` (bool)
+- `components` (dict of booleans)
+- `ml_trained` (bool)
+
 ### Core endpoints
 
 #### 1) GET `/risk`
@@ -139,6 +153,9 @@ Response shape:
 
 Forces retraining immediately.
 
+NOTE: On low-memory deployments (e.g. Render free 512MB), API retrain is disabled by default.
+Enable it only if you are sure the instance has enough memory.
+
 Response:
 - `{ "status": "retrained", "trained": true/false, "training_report": { ... } }`
 
@@ -174,10 +191,52 @@ cURL:
 curl -X POST http://127.0.0.1:8000/ml/retrain
 ```
 
+Option C (recommended for low-memory servers): run the standalone trainer script.
+
+From `backend/`:
+```powershell
+.\venv\Scripts\python.exe train_ml.py --force
+```
+
 ## Notes
 
 - Plot generation uses matplotlib with a headless backend (`Agg`).
 - If you ever want to disable plot generation: set env `FLOODWATCH_DISABLE_PLOTS=1` before starting the server.
+
+## Render (free tier) deployment notes (512MB)
+
+Render free instances can OOM during startup if the server tries to train ML or loads the full roads GraphML.
+
+### Recommended Render environment variables
+
+Set these in Render -> Environment:
+
+- `FLOODWATCH_ML_AUTO_TRAIN_ON_STARTUP=0`
+  - Prevents training during server startup.
+- `FLOODWATCH_ML_ALLOW_API_RETRAIN=0`
+  - Prevents calling `/ml/retrain` on the web instance.
+- `FLOODWATCH_LOAD_ROADS_GRAPH=0`
+  - Skips loading the (large) Kolkata roads GraphML into memory.
+  - `/route` will still work, but will return a demo-safe straight-line fallback.
+
+### How to provide a trained model to Render
+
+The web service will **only load** a persisted model if `backend/ml_artifacts/ml_model.joblib` exists.
+
+Recommended workflow:
+
+1) Train locally:
+```powershell
+cd backend
+.\venv\Scripts\python.exe train_ml.py --force
+```
+
+2) Commit and push the generated artifacts (at minimum):
+- `backend/ml_artifacts/ml_model.joblib`
+- `backend/ml_artifacts/ml_training_report.json`
+- `backend/ml_artifacts/plots/*.png`
+
+Then redeploy on Render.
 
 ## React Native map layer (Waterlogging Layer)
 

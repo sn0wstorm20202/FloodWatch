@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # Demo-safe mode: intentionally biases the system toward higher visible risk.
@@ -17,6 +18,11 @@ ML_REPORT_PATH = ML_ARTIFACT_DIR / "ml_training_report.json"
 ML_PLOTS_DIR = ML_ARTIFACT_DIR / "plots"
 
 ML_PERSIST_MODELS = True
+
+ML_AUTO_TRAIN_ON_STARTUP = os.getenv("FLOODWATCH_ML_AUTO_TRAIN_ON_STARTUP", "0") == "1"
+ML_ALLOW_API_RETRAIN = os.getenv("FLOODWATCH_ML_ALLOW_API_RETRAIN", "0") == "1"
+
+LOAD_ROADS_GRAPH = os.getenv("FLOODWATCH_LOAD_ROADS_GRAPH", "1") == "1"
 
 RAINFALL_CSV_PATH = DATA_DIR / "Kolkata_Rainfall.csv"
 SURFACE_WATER_CSV_PATH = DATA_DIR / "Kolkata_Surface_Water_CSV.csv"

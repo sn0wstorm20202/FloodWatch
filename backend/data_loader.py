@@ -68,7 +68,12 @@ class DataLoader:
         self._load_surface_water()
         self._load_elevation_raster()
         self._load_landcover_raster()
-        self._load_roads_graph()
+        if config.LOAD_ROADS_GRAPH:
+            self._load_roads_graph()
+        else:
+            self.graph = None
+            self._graph_nodes_lonlat = None
+            self._graph_node_ids = None
 
     def _candidate_paths(self, primary: Path) -> list[Path]:
         candidates: list[Path] = [primary]
