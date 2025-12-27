@@ -43,6 +43,13 @@ async def lifespan(app: FastAPI):
     global loader, store, ml_engine, routing_engine, alerts_engine
 
     logger.info("Starting FloodWatch backend (DEMO_MODE=%s)", config.DEMO_MODE)
+    logger.info(
+        "Startup flags: ML_AUTO_TRAIN_ON_STARTUP=%s ML_ALLOW_API_RETRAIN=%s LOAD_ROADS_GRAPH=%s ML_PERSIST_MODELS=%s",
+        config.ML_AUTO_TRAIN_ON_STARTUP,
+        config.ML_ALLOW_API_RETRAIN,
+        config.LOAD_ROADS_GRAPH,
+        config.ML_PERSIST_MODELS,
+    )
 
     loader = DataLoader()
     try:

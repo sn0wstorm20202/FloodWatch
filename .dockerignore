@@ -1,0 +1,22 @@
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.venv
+venv
+backend/.venv
+backend/venv
+.env
+*.log
+
+# Avoid shipping the large routing graph into the Docker build context
+kolkata_roads.graphml
+backend/data/kolkata_roads.graphml
+
+# IDE / OS junk
+.vscode
+.idea
+.DS_Store
+Thumbs.db

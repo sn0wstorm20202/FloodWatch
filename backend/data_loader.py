@@ -71,6 +71,7 @@ class DataLoader:
         if config.LOAD_ROADS_GRAPH:
             self._load_roads_graph()
         else:
+            logger.info("Roads graph loading disabled (FLOODWATCH_LOAD_ROADS_GRAPH=0)")
             self.graph = None
             self._graph_nodes_lonlat = None
             self._graph_node_ids = None
@@ -301,6 +302,7 @@ class DataLoader:
             return
 
         try:
+            logger.info("Loading roads graph (may be memory-heavy): path=%s", path)
             G = nx.read_graphml(path)
         except Exception:
             logger.exception("Failed to read roads graph from %s", path)

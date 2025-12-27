@@ -203,6 +203,38 @@ From `backend/`:
 - Plot generation uses matplotlib with a headless backend (`Agg`).
 - If you ever want to disable plot generation: set env `FLOODWATCH_DISABLE_PLOTS=1` before starting the server.
 
+## Hugging Face Spaces (Docker) deployment
+
+This repository includes a root `Dockerfile` that runs the FastAPI backend on port `7860`.
+
+### Deploy steps
+
+1) Create a new Space
+- Type: `Docker`
+
+2) Push this repository to the Space
+- Hugging Face will build the Docker image automatically.
+
+3) The Space should come up and serve:
+- `GET /health`
+- `GET /ready`
+- `GET /docs`
+
+Defaults used in the Docker image (safe for small instances):
+- `FLOODWATCH_ML_AUTO_TRAIN_ON_STARTUP=0`
+- `FLOODWATCH_ML_ALLOW_API_RETRAIN=0`
+- `FLOODWATCH_LOAD_ROADS_GRAPH=0`
+
+### Local Docker run (optional)
+
+From the project root:
+```bash
+docker build -t floodwatch .
+docker run --rm -p 7860:7860 floodwatch
+```
+Then open:
+- `http://127.0.0.1:7860/docs`
+
 ## Render (free tier) deployment notes (512MB)
 
 Render free instances can OOM during startup if the server tries to train ML or loads the full roads GraphML.

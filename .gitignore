@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Virtualenvs
+.venv/
+venv/
+backend/venv/
+backend/.venv/
+
+# Env / secrets
+.env
+
+# Logs
+*.log
+
+# Large routing graph (keep out of git by default)
+kolkata_roads.graphml
+backend/data/kolkata_roads.graphml
+
+# OS / IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
