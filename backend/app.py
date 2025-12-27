@@ -270,6 +270,38 @@ ml_engine: MLEngine | None = None
 routing_engine: RoutingEngine | None = None
 alerts_engine: AlertsEngine | None = None
 
+DEFAULT_PLOTS = {
+    "risk_heatmap": "risk_heatmap.png",
+}
+
+DEFAULT_PLOT_META = {
+    "risk_heatmap": {
+        "bounds": {
+            "west": 88.30827491320474,
+            "east": 88.47776904101242,
+            "south": 22.478332926893593,
+            "north": 22.65688806153375,
+        },
+        "bins": 80,
+    }
+}
+
+
+def _ensure_training_report_loaded() -> dict | None:
+    global ml_engine
+    if ml_engine is None:
+        return None
+    if isinstance(getattr(ml_engine, "training_report", None), dict):
+        return ml_engine.training_report
+    try:
+        if config.ML_REPORT_PATH.exists():
+            with config.ML_REPORT_PATH.open("r", encoding="utf-8") as f:
+                ml_engine.training_report = json.load(f)
+    except Exception:
+        logger.exception("Failed to load ML training report from disk")
+        return None
+    return ml_engine.training_report if isinstance(getattr(ml_engine, "training_report", None), dict) else None
+
 
 class ReportIn(BaseModel):
     lat: float = Field(..., ge=-90.0, le=90.0)
@@ -318,17 +350,23 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("ML training failed; continuing in demo-safe fallback mode")
 
-    try:
+     try:
         rep = getattr(ml_engine, "training_report", None)
+
+        # Load training report from disk if not already loaded
         if not (isinstance(rep, dict) and rep):
             try:
                 if config.ML_REPORT_PATH.exists():
                     with config.ML_REPORT_PATH.open("r", encoding="utf-8") as f:
                         rep = json.load(f)
+                        ml_engine.training_report = rep
             except Exception:
                 rep = None
+
+        # Pretty-print ML dashboard if report is available
         if isinstance(rep, dict) and rep:
             logger.info("\n%s", _format_training_report(rep))
+
     except Exception:
         logger.info("ML training report available but could not be serialized")
 
@@ -484,21 +522,47 @@ def get_ml_stats():
 @app.get("/ml/plots")
 def get_ml_plots():
     me = _require(ml_engine, "ml_engine")
-    plots = {}
-    if isinstance(me.training_report, dict):
-        plots = me.training_report.get("plots") or {}
+    report = _ensure_training_report_loaded()
+    plots: dict = {}
+    if isinstance(report, dict):
+        plots = report.get("plots") or {}
+
+    try:
+        if (not plots) and config.ML_PLOTS_DIR.exists():
+            for p in config.ML_PLOTS_DIR.glob("*.png"):
+                plots[p.stem] = p.name
+    except Exception:
+        pass
+
+    if not plots:
+        plots = dict(DEFAULT_PLOTS)
     return {"plots": plots}
 
 
 @app.get("/ml/plot/{plot_name}")
 def get_ml_plot(plot_name: str):
     me = _require(ml_engine, "ml_engine")
-    if not isinstance(me.training_report, dict):
-        raise HTTPException(status_code=404, detail="No training report available")
-    plots = me.training_report.get("plots") or {}
-    filename = plots.get(plot_name)
+    report = _ensure_training_report_loaded()
+
+    filename = None
+    if isinstance(report, dict):
+        plots = report.get("plots") or {}
+        filename = plots.get(plot_name)
+
+    if not isinstance(filename, str) or not filename:
+        filename = DEFAULT_PLOTS.get(plot_name)
+
+    if not isinstance(filename, str) or not filename:
+        candidate = config.ML_PLOTS_DIR / f"{plot_name}.png"
+        try:
+            if candidate.exists():
+                filename = candidate.name
+        except Exception:
+            filename = None
+
     if not isinstance(filename, str) or not filename:
         raise HTTPException(status_code=404, detail="Plot not found")
+
     p = config.ML_PLOTS_DIR / filename
     try:
         if not p.exists():
@@ -513,12 +577,17 @@ def get_ml_plot(plot_name: str):
 @app.get("/ml/plot_meta/{plot_name}")
 def get_ml_plot_meta(plot_name: str):
     me = _require(ml_engine, "ml_engine")
-    if not isinstance(me.training_report, dict):
-        raise HTTPException(status_code=404, detail="No training report available")
-    meta = me.training_report.get("plot_meta") or {}
-    if not isinstance(meta, dict):
-        meta = {}
-    out = meta.get(plot_name)
+    report = _ensure_training_report_loaded()
+
+    meta = {}
+    if isinstance(report, dict):
+        meta = report.get("plot_meta") or {}
+        if not isinstance(meta, dict):
+            meta = {}
+
+    out = meta.get(plot_name) if isinstance(meta, dict) else None
+    if out is None:
+        out = DEFAULT_PLOT_META.get(plot_name)
     if out is None:
         raise HTTPException(status_code=404, detail="Plot metadata not found")
     return {"plot": plot_name, "meta": out}
