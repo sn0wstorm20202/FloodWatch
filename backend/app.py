@@ -28,11 +28,25 @@ from utils import haversine_m, risk_level
 logging.basicConfig(level=getattr(logging, config.LOG_LEVEL, logging.INFO))
 logger = logging.getLogger("floodwatch")
 
+
+def _log_event(name: str, payload: dict | None = None) -> None:
+    try:
+        if payload is None:
+            payload = {}
+        logger.info("event=%s payload=%s", str(name), json.dumps(payload, ensure_ascii=False, default=str))
+    except Exception:
+        try:
+            logger.info("event=%s", str(name))
+        except Exception:
+            pass
+
+
 DEFAULT_PLOTS = {
     "risk_heatmap": "risk_heatmap.png",
     "waterlogging_hotspots_28y": "waterlogging_hotspots_28y.png",
     "waterlogging_combined": "waterlogging_combined.png",
 }
+
 
 DEFAULT_PLOT_META = {
     "risk_heatmap": {
