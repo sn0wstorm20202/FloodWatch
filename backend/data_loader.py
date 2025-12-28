@@ -4,6 +4,7 @@ import logging
 import os
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -45,6 +46,9 @@ class DataLoader:
         self.rainfall_col: Optional[str] = None
         self.rainfall_min: float = 0.0
         self.rainfall_max: float = 1.0
+
+        self._rain_ts_epoch: Optional[np.ndarray] = None
+        self._rain_vals: Optional[np.ndarray] = None
 
         self.surface_water_df: Optional[pd.DataFrame] = None
         self.surface_water_gdf = None
@@ -117,6 +121,8 @@ class DataLoader:
             self.rainfall_col = None
             self.rainfall_min = 0.0
             self.rainfall_max = 1.0
+            self._rain_ts_epoch = None
+            self._rain_vals = None
             return
 
         try:
@@ -127,6 +133,8 @@ class DataLoader:
             self.rainfall_col = None
             self.rainfall_min = 0.0
             self.rainfall_max = 1.0
+            self._rain_ts_epoch = None
+            self._rain_vals = None
             return
 
         rainfall_col = self._pick_numeric_column(df, preferred_substrings=["rain", "mm"])  # heuristic
@@ -136,6 +144,8 @@ class DataLoader:
             self.rainfall_col = None
             self.rainfall_min = 0.0
             self.rainfall_max = 1.0
+            self._rain_ts_epoch = None
+            self._rain_vals = None
             return
 
         series = pd.to_numeric(df[rainfall_col], errors="coerce").dropna()
@@ -144,6 +154,8 @@ class DataLoader:
             self.rainfall_col = rainfall_col
             self.rainfall_min = 0.0
             self.rainfall_max = 1.0
+            self._rain_ts_epoch = None
+            self._rain_vals = None
             return
 
         self.rainfall_df = df
@@ -159,9 +171,113 @@ class DataLoader:
             self.rainfall_min = 0.0
             self.rainfall_max = max(1.0, float(series.max()))
 
+        self._rain_ts_epoch = None
+        self._rain_vals = None
+        try:
+            if "system:index" in df.columns:
+                idx_raw = df["system:index"].tolist()
+                vals_raw = pd.to_numeric(df[rainfall_col], errors="coerce").tolist()
+                ts_list: list[float] = []
+                v_list: list[float] = []
+                for i, v in zip(idx_raw, vals_raw):
+                    try:
+                        if v is None or not np.isfinite(float(v)):
+                            continue
+                        ts = self._parse_rainfall_index_to_epoch(i)
+                        if ts is None:
+                            continue
+                        ts_list.append(float(ts))
+                        v_list.append(float(v))
+                    except Exception:
+                        continue
+
+                if ts_list:
+                    ts_arr = np.asarray(ts_list, dtype=float)
+                    v_arr = np.asarray(v_list, dtype=float)
+                    order = np.argsort(ts_arr)
+                    self._rain_ts_epoch = ts_arr[order]
+                    self._rain_vals = v_arr[order]
+        except Exception:
+            self._rain_ts_epoch = None
+            self._rain_vals = None
+
         logger.info(
             "Loaded rainfall CSV: path=%s col=%s vmin=%.3f vmax=%.3f", path, rainfall_col, self.rainfall_min, self.rainfall_max
         )
+
+    def _parse_rainfall_index_to_epoch(self, value) -> Optional[float]:
+        try:
+            if value is None:
+                return None
+            s = str(value).strip()
+            if not s:
+                return None
+            if s.isdigit() and len(s) == 14:
+                dt = datetime.strptime(s, "%Y%m%d%H%M%S")
+            elif s.isdigit() and len(s) == 8:
+                dt = datetime.strptime(s, "%Y%m%d")
+            else:
+                return None
+
+            tz = datetime.now().astimezone().tzinfo
+            if tz is None:
+                tz = timezone.utc
+            dt = dt.replace(tzinfo=tz).astimezone(timezone.utc)
+            return float(dt.timestamp())
+        except Exception:
+            return None
+
+    def rainfall_value_at(self, ts_epoch: float) -> Optional[float]:
+        if self._rain_ts_epoch is None or self._rain_vals is None:
+            return self.latest_rainfall_value()
+        if self._rain_ts_epoch.size == 0 or self._rain_vals.size == 0:
+            return self.latest_rainfall_value()
+        try:
+            t = float(ts_epoch)
+            arr = self._rain_ts_epoch
+            i = int(np.searchsorted(arr, t))
+            if i <= 0:
+                idx = 0
+            elif i >= int(arr.size):
+                idx = int(arr.size) - 1
+            else:
+                before = float(arr[i - 1])
+                after = float(arr[i])
+                idx = int(i - 1) if abs(t - before) <= abs(after - t) else int(i)
+            return float(self._rain_vals[idx])
+        except Exception:
+            return self.latest_rainfall_value()
+
+    def rainfall_value_at_exact(self, ts_epoch: float, tolerance_s: float = 1.0) -> Optional[float]:
+        """Return rainfall only if the timestamp matches the dataset (within tolerance).
+
+        This is used for user-provided time queries where we want to return
+        'No data found' instead of silently snapping to the nearest point.
+        """
+
+        if self._rain_ts_epoch is None or self._rain_vals is None:
+            return None
+        if self._rain_ts_epoch.size == 0 or self._rain_vals.size == 0:
+            return None
+
+        try:
+            t = float(ts_epoch)
+            arr = self._rain_ts_epoch
+            i = int(np.searchsorted(arr, t))
+            candidates: list[int] = []
+            if 0 <= i < int(arr.size):
+                candidates.append(int(i))
+            if 0 <= (i - 1) < int(arr.size):
+                candidates.append(int(i - 1))
+            for idx in candidates:
+                if abs(float(arr[idx]) - t) <= float(tolerance_s):
+                    return float(self._rain_vals[idx])
+            return None
+        except Exception:
+            return None
+
+    def rainfall_has_timestamp(self, ts_epoch: float, tolerance_s: float = 1.0) -> bool:
+        return self.rainfall_value_at_exact(ts_epoch, tolerance_s=tolerance_s) is not None
 
     def _load_surface_water(self) -> None:
         path = self._resolve_existing_path(config.SURFACE_WATER_CSV_PATH)

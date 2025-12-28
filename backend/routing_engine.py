@@ -8,7 +8,8 @@ import networkx as nx
 import config
 from data_loader import DataLoader
 from ml_engine import MLEngine
-from utils import haversine_m, km_from_m, mean, to_linestring_geojson_lonlat
+from store import ReportStore
+from utils import clamp01, haversine_m, km_from_m, mean, to_linestring_geojson_lonlat
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +21,11 @@ class RoutingEngine:
         edge_weight = length * (1 + ml_risk)
     """
 
-    def __init__(self, loader: DataLoader, ml_engine: MLEngine) -> None:
+    def __init__(self, loader: DataLoader, ml_engine: MLEngine, store: ReportStore | None = None) -> None:
         self.loader = loader
         self.ml_engine = ml_engine
+        self.store = store
+        self._use_crowd_for_weight: bool = False
         self.graph = self._prepare_graph(loader.graph)
 
     def _prepare_graph(self, G: Optional[nx.Graph]) -> Optional[nx.Graph]:
@@ -47,7 +50,14 @@ class RoutingEngine:
 
         return G
 
-    def route(self, start_lat: float, start_lon: float, end_lat: float, end_lon: float) -> Tuple[float, float, dict]:
+    def route(
+        self,
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+        use_crowd: bool = False,
+    ) -> Tuple[float, float, dict]:
         """Compute safest route.
 
         Returns:
@@ -65,11 +75,16 @@ class RoutingEngine:
         if start_node is None or end_node is None:
             return self._fallback_route(start_lat, start_lon, end_lat, end_lon)
 
+        prev = bool(self._use_crowd_for_weight)
+        self._use_crowd_for_weight = bool(use_crowd)
         try:
             path = nx.shortest_path(self.graph, source=start_node, target=end_node, weight=self._weight)
         except Exception:
             logger.exception("Routing failed; using fallback route")
+            self._use_crowd_for_weight = prev
             return self._fallback_route(start_lat, start_lon, end_lat, end_lon)
+        finally:
+            self._use_crowd_for_weight = prev
 
         coords_lonlat: list[list[float]] = []
         points_latlon: list[tuple[float, float]] = []
@@ -84,14 +99,38 @@ class RoutingEngine:
             return self._fallback_route(start_lat, start_lon, end_lat, end_lon)
 
         distance_m = self._path_length_m(path)
-        route_risk = self._route_risk_from_points(points_latlon)
+        route_risk = self._route_risk_from_points(points_latlon, use_crowd=bool(use_crowd))
         return km_from_m(distance_m), float(route_risk), to_linestring_geojson_lonlat(coords_lonlat)
 
-    def _route_risk_from_points(self, points_latlon: list[tuple[float, float]]) -> float:
+    def _route_risk_from_points(self, points_latlon: list[tuple[float, float]], use_crowd: bool) -> float:
         if not points_latlon:
             return 0.0
-        vals = [float(self.ml_engine.predict_risk(lat, lon)["ml_risk"]) for (lat, lon) in points_latlon]
+        vals = [float(self._risk_at_point(lat, lon, use_crowd=bool(use_crowd))) for (lat, lon) in points_latlon]
         return float(mean(vals))
+
+    def _crowd_risk_at(self, lat: float, lon: float) -> float:
+        st = self.store
+        if st is None:
+            return 0.0
+        try:
+            count, sev_sum = st.stats_near(lat, lon, radius_m=float(config.CROWD_INFLUENCE_RADIUS_M))
+            density_score = clamp01(float(count) / float(config.CROWD_MAX_REPORTS_FOR_FULL_SCORE))
+            severity_score = clamp01(float(sev_sum) / float(config.CROWD_MAX_REPORTS_FOR_FULL_SCORE))
+            return clamp01(0.6 * density_score + 0.4 * severity_score)
+        except Exception:
+            return 0.0
+
+    def _risk_at_point(self, lat: float, lon: float, use_crowd: bool) -> float:
+        try:
+            ml = float(self.ml_engine.predict_risk(float(lat), float(lon))["ml_risk"])
+        except Exception:
+            ml = 0.7 if config.DEMO_MODE else 0.3
+
+        if not use_crowd:
+            return clamp01(ml)
+
+        crowd = self._crowd_risk_at(float(lat), float(lon))
+        return clamp01(max(float(ml), float(crowd)))
 
     def _path_length_m(self, path: list[str]) -> float:
         total = 0.0
@@ -154,7 +193,7 @@ class RoutingEngine:
         if mid is None:
             risk = 0.7 if config.DEMO_MODE else 0.3
         else:
-            risk = float(self.ml_engine.predict_risk(mid[0], mid[1])["ml_risk"])
+            risk = float(self._risk_at_point(mid[0], mid[1], use_crowd=bool(self._use_crowd_for_weight)))
 
         # Mandatory weighting
         return float(length_m) * (1.0 + float(risk))
@@ -163,8 +202,8 @@ class RoutingEngine:
         dist_m = haversine_m(start_lat, start_lon, end_lat, end_lon)
         route_risk = mean(
             [
-                float(self.ml_engine.predict_risk(start_lat, start_lon)["ml_risk"]),
-                float(self.ml_engine.predict_risk(end_lat, end_lon)["ml_risk"]),
+                float(self._risk_at_point(start_lat, start_lon, use_crowd=bool(self._use_crowd_for_weight))),
+                float(self._risk_at_point(end_lat, end_lon, use_crowd=bool(self._use_crowd_for_weight))),
             ]
         )
         geom = to_linestring_geojson_lonlat([[float(start_lon), float(start_lat)], [float(end_lon), float(end_lat)]])

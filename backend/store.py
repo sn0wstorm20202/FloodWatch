@@ -38,6 +38,12 @@ class ReportStore:
         severity = max(config.CROWD_SEVERITY_MIN, min(config.CROWD_SEVERITY_MAX, severity))
         self._reports.append(CrowdReport(lat=float(lat), lon=float(lon), severity=severity, ts=self._now()))
 
+    def add_report_at(self, lat: float, lon: float, severity: int, ts: float) -> None:
+        self.prune()
+        severity = int(severity)
+        severity = max(config.CROWD_SEVERITY_MIN, min(config.CROWD_SEVERITY_MAX, severity))
+        self._reports.append(CrowdReport(lat=float(lat), lon=float(lon), severity=severity, ts=float(ts)))
+
     def all_reports(self) -> List[CrowdReport]:
         self.prune()
         return list(self._reports)

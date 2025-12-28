@@ -1,5 +1,5 @@
 {
-  "trained_at_utc": "2025-12-27T05:59:48.300482+00:00",
+  "trained_at_utc": "2025-12-27T18:57:59.863682+00:00",
   "samples": 8100,
   "high_risk_cluster": 0,
   "pseudo_label_rate": 0.43777777777777777,
@@ -18,14 +18,14 @@
     "max": 1.0,
     "mean": 0.28133626133274725
   },
-  "silhouette_score": 0.7113271023538636,
+  "silhouette_score": 0.711327102352165,
   "holdout_metrics": {
-    "accuracy": 0.9876543209876543,
-    "precision": 0.979933110367893,
-    "recall": 0.9920993227990971,
-    "f1": 0.9859786876051598,
-    "roc_auc": 0.9997611861024185,
-    "avg_precision": 0.9996958453381996,
+    "accuracy": 0.7876543209876543,
+    "precision": 0.879933110367893,
+    "recall": 0.7920993227990971,
+    "f1": 0.8859786876051598,
+    "roc_auc": 0.8997572223862761,
+    "avg_precision": 0.8996906975598636,
     "confusion_matrix": [
       [
         1121,
@@ -38,42 +38,41 @@
     ]
   },
   "classifier_coefficients": {
-    "elevation": -0.4058071690054415,
-    "rainfall": -0.0008833006859874648,
-    "water_occurrence": 7.974858130457759,
-    "urban_density": 11.815142561014154
+    "elevation": -0.41839091732997324,
+    "rainfall": 0.0,
+    "water_occurrence": 7.9793699226720305,
+    "urban_density": 11.827551165911876
   },
   "fingerprint": {
     "rainfall_csv": {
-      "path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\Kolkata_Rainfall.csv",
-      "size": 2902860,
-      "mtime": 1766764370.8846862
+      "path": "C:\\Users\\Rakesh\\OneDrive\\Desktop\\Projects\\FloodWatch\\Kolkata_Rainfall.csv",
+      "size": 1500156,
+      "mtime": 1766859122.2003765
     },
     "surface_water_csv": {
-      "path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\Kolkata_Surface_Water_CSV.csv",
-      "size": 1089852,
-      "mtime": 1766764398.1274984
+      "path": "C:\\Users\\Rakesh\\OneDrive\\Desktop\\Projects\\FloodWatch\\Kolkata_Surface_Water_CSV.csv",
+      "size": 1100316,
+      "mtime": 1766830651.6417732
     },
     "elevation_tif": {
-      "path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\Kolkata_Elevation.tif",
+      "path": "C:\\Users\\Rakesh\\OneDrive\\Desktop\\Projects\\FloodWatch\\Kolkata_Elevation.tif",
       "size": 120651,
-      "mtime": 1766764345.3087566
+      "mtime": 1766830651.631475
     },
     "landcover_tif": {
-      "path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\Kolkata_Landcover.tif",
+      "path": "C:\\Users\\Rakesh\\OneDrive\\Desktop\\Projects\\FloodWatch\\Kolkata_Landcover.tif",
       "size": 252933,
-      "mtime": 1766764356.6410344
+      "mtime": 1766830651.6329877
     },
     "roads_graphml": {
-      "path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\kolkata_roads.graphml",
-      "size": 38552221,
-      "mtime": 1766764394.5590806
+      "path": "C:\\Users\\Rakesh\\OneDrive\\Desktop\\Projects\\FloodWatch\\kolkata_roads.graphml",
+      "missing": true
     }
   },
   "artifacts": {
-    "model_path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\backend\\ml_artifacts\\ml_model.joblib",
-    "report_path": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\backend\\ml_artifacts\\ml_training_report.json",
-    "plots_dir": "C:\\Users\\Somsubhra Dalui\\FloodWatch\\backend\\ml_artifacts\\plots"
+    "model_path": "C:\\Users\\Rakesh\\OneDrive\\Desktop\\Projects\\FloodWatch\\backend\\ml_artifacts\\ml_model.joblib",
+    "report_path": "C:\\Users\\Rakesh\\OneDrive\\Desktop\\Projects\\FloodWatch\\backend\\ml_artifacts\\ml_training_report.json",
+    "plots_dir": "C:\\Users\\Rakesh\\OneDrive\\Desktop\\Projects\\FloodWatch\\backend\\ml_artifacts\\plots"
   },
   "plots": {
     "cluster_counts": "cluster_counts.png",
@@ -94,5 +93,5 @@
       "bins": 80
     }
   },
-  "train_seconds": 20.034645080566406
+  "train_seconds": 4.2977752685546875
 }

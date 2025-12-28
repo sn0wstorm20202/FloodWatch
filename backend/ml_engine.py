@@ -535,12 +535,33 @@ class MLEngine:
             logger.exception("ML predict failed; returning demo-safe defaults")
             return self._predict_risk_fallback(lat, lon)
 
+    def predict_risk_at(self, lat: float, lon: float, ts_epoch: float) -> dict:
+        """Return ML flood risk for a point at a specific timestamp.
+
+        This overrides the rainfall scalar using the rainfall CSV's system:index timeline.
+        """
+
+        lat_r = round_coord(lat, config.RISK_CACHE_ROUND_DECIMALS)
+        lon_r = round_coord(lon, config.RISK_CACHE_ROUND_DECIMALS)
+
+        rain_raw = None
+        try:
+            rain_raw = self.loader.rainfall_value_at(float(ts_epoch))
+        except Exception:
+            rain_raw = None
+
+        try:
+            return self._predict_risk_uncached(lat_r, lon_r, rainfall_raw_override=rain_raw)
+        except Exception:
+            logger.exception("ML predict_at failed; returning demo-safe defaults")
+            return self._predict_risk_fallback(lat_r, lon_r, rainfall_raw_override=rain_raw)
+
     def _coord_noise01(self, lat: float, lon: float) -> float:
         """Deterministic pseudo-random value in [0,1) derived from coordinates."""
         x = math.sin(lat * 12.9898 + lon * 78.233) * 43758.5453
         return float(x - math.floor(x))
 
-    def _predict_risk_fallback(self, lat: float, lon: float) -> dict:
+    def _predict_risk_fallback(self, lat: float, lon: float, rainfall_raw_override: float | None = None) -> dict:
         """Deployment-safe fallback when the ML model or datasets aren't available.
 
         Goal:
@@ -552,7 +573,7 @@ class MLEngine:
 
         feats = None
         try:
-            feats = self._extract_features(float(lat), float(lon))
+            feats = self._extract_features(float(lat), float(lon), rainfall_raw_override=rainfall_raw_override)
         except Exception:
             feats = None
 
@@ -607,6 +628,29 @@ class MLEngine:
             proba = float(self.models.classifier_model.predict_proba(X)[0][1])
         except Exception:
             # Demo-safe: if classifier fails, fall back to a blend of anomaly and cluster interpretation.
+            proba = float(clamp01(0.6 * anomaly_score + 0.4 * self.cluster_risk_map.get(cluster_id, 0.5)))
+
+        return {"ml_risk": float(clamp01(proba)), "cluster_id": cluster_id, "anomaly_score": float(clamp01(anomaly_score))}
+
+    def _predict_risk_uncached(self, lat_rounded: float, lon_rounded: float, rainfall_raw_override: float | None) -> dict:
+        if self.models is None:
+            return self._predict_risk_fallback(lat_rounded, lon_rounded, rainfall_raw_override=rainfall_raw_override)
+
+        feats = self._extract_features(lat_rounded, lon_rounded, rainfall_raw_override=rainfall_raw_override)
+        if feats is None:
+            return self._predict_risk_fallback(lat_rounded, lon_rounded, rainfall_raw_override=rainfall_raw_override)
+
+        X = np.asarray([[feats["elevation"], feats["rainfall"], feats["water_occurrence"], feats["urban_density"]]], dtype=float)
+        X_anom = np.asarray([[feats["rainfall"], feats["water_occurrence"], feats["elevation"]]], dtype=float)
+
+        cluster_id = int(self.models.cluster_model.predict(X)[0])
+
+        raw = -self.models.anomaly_model.score_samples(X_anom)
+        anomaly_score = float(self._normalize_anomaly_raw(raw)[0])
+
+        try:
+            proba = float(self.models.classifier_model.predict_proba(X)[0][1])
+        except Exception:
             proba = float(clamp01(0.6 * anomaly_score + 0.4 * self.cluster_risk_map.get(cluster_id, 0.5)))
 
         return {"ml_risk": float(clamp01(proba)), "cluster_id": cluster_id, "anomaly_score": float(clamp01(anomaly_score))}
@@ -790,7 +834,7 @@ class MLEngine:
             logger.exception("Water occurrence computation failed")
             return np.full_like(lat, 0.7 if config.DEMO_MODE else 0.3, dtype=float)
 
-    def _extract_features(self, lat: float, lon: float) -> Optional[dict]:
+    def _extract_features(self, lat: float, lon: float, rainfall_raw_override: float | None = None) -> Optional[dict]:
         # Elevation
         elev = self.loader.sample_raster_value(self.loader.elevation_ds, lat=lat, lon=lon)
         if elev is None:
@@ -806,7 +850,7 @@ class MLEngine:
             urban = normalize_minmax(float(lc), self._lc_vmin, self._lc_vmax)
 
         # Rainfall scalar
-        r_val = self.loader.latest_rainfall_value()
+        r_val = rainfall_raw_override if rainfall_raw_override is not None else self.loader.latest_rainfall_value()
         if r_val is None:
             r_raw = float(self._rain_vmax) if config.DEMO_MODE else float(self._rain_vmin)
         else:
