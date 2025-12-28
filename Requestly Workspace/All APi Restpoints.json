@@ -1,0 +1,29 @@
+{
+  "name": "All APi Restpoints",
+  "request": {
+    "type": "http",
+    "url": "http://127.0.0.1:8000/risk",
+    "scripts": {
+      "preRequest": "",
+      "postResponse": ""
+    },
+    "method": "GET",
+    "queryParams": [
+      {
+        "id": 1766877689734,
+        "key": "",
+        "value": "",
+        "isEnabled": false,
+        "description": "",
+        "dataType": "string"
+      }
+    ],
+    "headers": [],
+    "body": "{\n  \"risk_score\": 0.97,\n  \"risk_level\": \"HIGH\",\n  \"reason\": {\n    \"rainfall\": \"Extreme\",\n    \"elevation\": \"Low\",\n    \"surface_water\": \"High\"\n  }\n}\n",
+    "contentType": "text/plain",
+    "auth": {
+      "currentAuthType": "INHERIT",
+      "authConfigStore": {}
+    }
+  }
+}

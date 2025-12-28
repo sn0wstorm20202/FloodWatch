@@ -1,0 +1,11 @@
+{
+  "name": "New Environment",
+  "variables": {
+    "BASE_URL": {
+      "value": "http://127.0.0.1:8000/",
+      "type": "string",
+      "id": 0,
+      "isSecret": false
+    }
+  }
+}
